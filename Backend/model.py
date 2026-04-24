@@ -1,11 +1,12 @@
 import sentencepiece as spm
-from tensorflow import keras
+import tensorflow
+import keras
 
 from layers import TokenAndPositionEmbedding, TransformerBlock
 
 model = keras.models.load_model(
 
-    "./models/best_emma.keras",
+    "Backend/models/best_emma.keras",
 
     custom_objects={
 
@@ -18,4 +19,4 @@ model = keras.models.load_model(
 )
 
 sp = spm.SentencePieceProcessor()
-sp.load("./tokenizers/emma_tokenizer.model")
+sp.load("Backend/tokenizers/emma_tokenizer.model")
