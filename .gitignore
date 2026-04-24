@@ -1,6 +1,9 @@
 *.keras
 *.model
 
+node_modules
+dist
+
 .idea
 __pycache__/
 *.pyc
