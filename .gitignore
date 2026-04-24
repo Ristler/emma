@@ -11,7 +11,4 @@ __pycache__/
 *.pyd
 .DS_Store
 *.ipynb_checkpoints
-*.log
-*.csv
-*.h5
-*.json
+
