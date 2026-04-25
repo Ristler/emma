@@ -1,3 +1,77 @@
+/* Ensure chat area and bubbles wrap and scroll properly */
+
+/* Responsive chat area and bubbles */
+.chatbox-area {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 70vh;
+}
+
+.messages {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: none;
+  border-radius: 0;
+  background: var(--social-bg);
+  box-shadow: none;
+  padding: 24px 24px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scrollbar-gutter: stable;
+  padding-bottom: 0 !important;
+  max-height: 70vh;
+}
+
+@media (max-width: 600px) {
+  .chatbox-area, .messages {
+    max-height: 60vh;
+    padding: 8px 2vw 8px 2vw;
+  }
+  .bubble {
+    padding: 10px 10px;
+    font-size: 15px;
+  }
+}
+
+.messages::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+.messages::-webkit-scrollbar-thumb {
+  background: #e0e0e0;
+  border-radius: 4px;
+}
+.messages:hover::-webkit-scrollbar-thumb {
+  background: #bdbdbd;
+}
+.messages {
+  scrollbar-width: thin;
+  scrollbar-color: #e0e0e0 transparent;
+}
+
+.bubbleContent {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+/* Typewriter animation for assistant message */
+.typewriter {
+  display: inline-block;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  animation: typewriter-blink 1s steps(1) infinite;
+}
+
+@keyframes typewriter-blink {
+  0%, 100% { border-right: 2px solid #bbb; }
+  50% { border-right: 2px solid transparent; }
+}
 .app {
   flex: 1;
   display: flex;
@@ -118,13 +192,16 @@
 }
 
 .bubble {
-  max-width: min(72ch, 100%);
+  max-width: 90vw;
+  width: fit-content;
   border-radius: 18px;
   padding: 14px 18px;
   border: 1px solid var(--border);
   background: var(--bg);
   box-shadow: 0 1px 4px 0 rgba(0,0,0,0.03);
   transition: box-shadow 0.2s, border-color 0.2s;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .messageRow.isUser .bubble {

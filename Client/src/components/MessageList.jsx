@@ -36,6 +36,10 @@ export default function MessageList({ messages, isSending, bottomRef }) {
     };
   }, [messages, isSending]);
 
+  // Only show 'Thinking...' if there is no assistant message being streamed
+  const lastMsg = messages[messages.length - 1]
+  const showThinking = isSending && (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.content)
+
   return (
     <div className="messages" ref={messagesRef} role="log" aria-live="polite">
       {messages.length === 0 ? (
@@ -45,21 +49,21 @@ export default function MessageList({ messages, isSending, bottomRef }) {
         </div>
       ) : null}
 
-      {messages.map((m) => (
+      {messages.map((m, i) => (
         <div
-          key={m.id}
+          key={m.id || i}
           className={`messageRow ${m.role === 'user' ? 'isUser' : 'isAssistant'}`}
         >
           <div className="bubble bubble-appear">
             <div className="bubbleRole">{m.role}
               <span className="bubbleTimestamp">{formatTime(m.timestamp)}</span>
             </div>
-            <div className="bubbleContent">{m.content}</div>
+            <div className={`bubbleContent${m.role === 'assistant' ? ' typewriter' : ''}`}>{m.content}</div>
           </div>
         </div>
       ))}
 
-      {isSending ? (
+      {showThinking ? (
         <div className="messageRow isAssistant">
           <div className="bubble">
             <div className="bubbleRole">Willow</div>
