@@ -13,7 +13,8 @@ function App() {
   const [error, setError] = useState('')
   const bottomRef = useRef(null)
   const [paramsOpen, setParamsOpen] = useState(false)
-  const [modelParams, setModelParams] = useState({ temperature: 1, maxTokens: 512 })
+  const [modelParams, setModelParams] = useState({ temperature: 0.5, maxTokens: 80 })
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
   const [cutOff, setCutOff] = useState(false)
   const abortControllerRef = useRef(null)
 
@@ -21,6 +22,14 @@ function App() {
   async function sendPrompt(userPrompt) {
     const trimmed = userPrompt.trim()
     if (!trimmed || isSending) return
+
+    if (trimmed === '/reset') {
+      setSessionId(crypto.randomUUID())
+      setCutOff(false)
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'History cleared.', timestamp: new Date().toISOString() }])
+      setPrompt('')
+      return
+    }
 
     // Abort any previous request
     if (abortControllerRef.current) {
@@ -46,6 +55,7 @@ function App() {
           prompt: trimmed,
           temperature: modelParams.temperature,
           num_tokens: modelParams.maxTokens,
+          session_id: sessionId,
           stream: true
         }),
         signal: abortController.signal
@@ -62,25 +72,16 @@ function App() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let done = false
-      let lastContent = ''
       let tokenCount = 0
       while (!done) {
         const { value, done: doneReading } = await reader.read()
         done = doneReading
         if (value) {
           const chunk = decoder.decode(value)
-          // Only append the new part
-          let newText = chunk
-          if (chunk.startsWith(lastContent)) {
-            newText = chunk.slice(lastContent.length)
-          } else if (lastContent && chunk.includes(lastContent)) {
-            newText = chunk.slice(chunk.indexOf(lastContent) + lastContent.length)
-          }
           assistantMessage = {
             ...assistantMessage,
-            content: assistantMessage.content + newText
+            content: assistantMessage.content + chunk
           }
-          lastContent = chunk
           tokenCount++
           setMessages((prev) => {
             // Replace the last assistant message with the updated one

@@ -86,7 +86,7 @@ export default function ModelParamsPanel({ open, onClose, params, setParams }) {
             <input
               type="number"
               min="1"
-              max="4096"
+              max="512"
               value={params.maxTokens}
               onChange={e => setParams(p => ({ ...p, maxTokens: Number(e.target.value) }))}
               className="paramNumber"

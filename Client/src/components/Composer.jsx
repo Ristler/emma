@@ -20,7 +20,7 @@ export default function Composer({ prompt, setPrompt, onSubmit, onComposerKeyDow
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder="Send a prompt"
+          placeholder="Send a prompt · /reset to clear history"
           rows={1}
           disabled={isSending}
           aria-label="Message"

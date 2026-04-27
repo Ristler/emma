@@ -1,64 +1,260 @@
-import sentencepiece as spm
+import os
+from collections import Counter
+
 import numpy as np
+import sentencepiece as spm
+
 from model import model, sp
 
+# ── Special token IDs (must match training) ──────────────────────────────────
+PAD_ID       = sp.pad_id()
+BOS_ID       = sp.bos_id()
+EOS_ID       = sp.eos_id()
+USER_ID      = sp.piece_to_id("<user>")
+ASSISTANT_ID = sp.piece_to_id("<assistant>")
+SEP_ID       = sp.piece_to_id("<sep>")
+
+MODEL_MAX_SEQ_LEN = 512
+
+# ── Defaults (mirror the demo script) ────────────────────────────────────────
+DEFAULT_MAX_NEW_TOKENS       = 80
+DEFAULT_TEMPERATURE          = 0.5
+DEFAULT_TOP_K                = 40
+DEFAULT_REPETITION_PENALTY   = 1.15
+DEFAULT_FREQUENCY_PENALTY    = 0.08
+DEFAULT_RECENT_TOKEN_PENALTY = 0.12
+DEFAULT_RECENT_TOKEN_WINDOW  = 14
+DEFAULT_NO_REPEAT_NGRAM_SIZE = 3
+DEFAULT_MAX_CONTEXT_TURNS    = 6
 
 
+# ── Prompt building ───────────────────────────────────────────────────────────
+
+def _encode_turn(role_id: int, text: str) -> list[int]:
+    """Encode a single conversation turn into token IDs.
+
+    Wraps the encoded text with the speaker's role token at the front and a
+    <sep> token at the end, matching the format used during training.
+    """
+    return [role_id] + sp.encode(text, out_type=int) + [SEP_ID]
 
 
-def _init__(self, model_path: str):
-    self.model = self._load_model(model_path)
-  
-    self.conversation_turns = []
-    self.sp = spm.SentencePieceProcessor(model_file=model_path)
+def build_prompt_ids(conversation_turns: list[str]) -> list[int]:
+    """Convert a list of alternating conversation turns into a flat token ID sequence.
+
+    Turns at even indices are treated as user messages, odd indices as assistant
+    messages. The sequence starts with BOS and ends with the ASSISTANT_ID token
+    to signal that the model should generate the next assistant reply.
+
+    Example for two turns ["Hello", "Hi there"]:
+        [BOS, <user>, ...Hello..., <sep>, <assistant>, ...Hi there..., <sep>, <assistant>]
+    """
+    ids = [BOS_ID]
+    for i, turn in enumerate(conversation_turns):
+        role_id = USER_ID if i % 2 == 0 else ASSISTANT_ID
+        ids.extend(_encode_turn(role_id, turn))
+    ids.append(ASSISTANT_ID)
+    return ids
 
 
+def trim_turns(turns: list[str], max_turns: int) -> list[str]:
+    """Keep only the most recent `max_turns` turns from the conversation history.
+
+    Prevents the prompt from growing beyond the model's context window over long
+    conversations. Returns the list unchanged if it is already within the limit.
+    """
+    if max_turns <= 0 or len(turns) <= max_turns:
+        return turns
+    return turns[-max_turns:]
 
 
-def softmax(logits, temperature=1.0):
-    logits = np.array(logits) / temperature
-    exp = np.exp(logits - np.max(logits))
-    return exp / exp.sum()
+# ── Sampling helpers ──────────────────────────────────────────────────────────
 
-def generate_tokens(prompt, num_tokens=150, stop_on_special=True, temperature=1.0, stream=False):
-    import re
-    input_ids = sp.encode(prompt, out_type=int)
-    generated_ids = []
-    pad_id = sp.pad_id() if hasattr(sp, 'pad_id') else 0
-    unk_id = sp.unk_id() if hasattr(sp, 'unk_id') else 1
-    eos_id = sp.eos_id() if hasattr(sp, 'eos_id') else -1
+def _blocked_ngram_tokens(reply_tokens: list[int], n: int) -> set[int]:
+    """Return the set of tokens that would complete an already-seen n-gram.
 
-    def token_stream():
-        for i in range(num_tokens):
-            if len(input_ids) < 512:
-                padded = input_ids + [pad_id] * (512 - len(input_ids))
-            else:
-                padded = input_ids[-512:]
-            input_array = np.array([padded])
-            pred = model.predict(input_array)
-            idx = len(input_ids)-1 if len(input_ids) <= 512 else 511
-            logits = pred[0, idx]
-            probs = softmax(logits, temperature)
-            next_token_id = int(np.random.choice(len(probs), p=probs))
-            if stop_on_special and next_token_id in [pad_id, unk_id, eos_id]:
-                print(f"Stopping generation at step {i+1} due to special token: {next_token_id}")
+    Looks at the last (n-1) generated tokens as a prefix and finds every
+    token that completed that same prefix earlier in the reply. Those tokens
+    are blocked so the model cannot repeat the same n-gram phrase.
+    """
+    if n < 2 or len(reply_tokens) < n - 1:
+        return set()
+    prefix = tuple(reply_tokens[-(n - 1):])
+    blocked = set()
+    for start in range(len(reply_tokens) - n + 1):
+        ngram = reply_tokens[start: start + n]
+        if tuple(ngram[:-1]) == prefix:
+            blocked.add(ngram[-1])
+    return blocked
+
+
+def _apply_repetition_controls(
+    logits: np.ndarray,
+    reply_tokens: list[int],
+    repetition_penalty: float,
+    frequency_penalty: float,
+    recent_token_penalty: float,
+    recent_token_window: int,
+    no_repeat_ngram_size: int,
+) -> np.ndarray:
+    """Adjust raw model logits to reduce repetitive output.
+
+    Applies four independent controls in order:
+    - Structural token blocking: sets logits for PAD, <user>, and <assistant>
+      to -inf so they can never be sampled as reply content.
+    - Repetition penalty: divides (positive) or multiplies (negative) the logit
+      of every token that has already appeared anywhere in the reply, making
+      previously used tokens less likely.
+    - Frequency penalty: subtracts a fixed amount per occurrence for each token,
+      so tokens used many times are penalised more heavily than tokens used once.
+    - Recent token penalty: subtracts a flat penalty for each token seen within
+      the last `recent_token_window` positions, targeting short-range repetition
+      such as stuttering or repeated phrases.
+    - N-gram blocking: sets logits to -inf for any token that would complete an
+      n-gram already produced in the current reply.
+
+    Returns a float64 copy of the logits with all adjustments applied.
+    """
+    adj = logits.astype(np.float64).copy()
+
+    for tid in (PAD_ID, USER_ID, ASSISTANT_ID):
+        if 0 <= tid < len(adj):
+            adj[tid] = -1e10
+
+    if not reply_tokens:
+        return adj
+
+    if repetition_penalty > 1.0:
+        for tid in set(reply_tokens):
+            if 0 <= tid < len(adj):
+                adj[tid] = adj[tid] / repetition_penalty if adj[tid] >= 0 else adj[tid] * repetition_penalty
+
+    if frequency_penalty > 0:
+        for tid, count in Counter(reply_tokens).items():
+            if 0 <= tid < len(adj):
+                adj[tid] -= frequency_penalty * count
+
+    if recent_token_penalty > 0 and recent_token_window > 0:
+        for tid in reply_tokens[-recent_token_window:]:
+            if 0 <= tid < len(adj):
+                adj[tid] -= recent_token_penalty
+
+    for tid in _blocked_ngram_tokens(reply_tokens, no_repeat_ngram_size):
+        if 0 <= tid < len(adj):
+            adj[tid] = -1e10
+
+    return adj
+
+
+def _sample_next_token(logits: np.ndarray, reply_tokens: list[int], **ctrl) -> int:
+    """Sample the next token ID from adjusted logits.
+
+    First applies all repetition controls, then either:
+    - Returns the argmax token when temperature is 0 (greedy/deterministic).
+    - Applies temperature scaling and samples from the top-k candidates
+      using a softmax probability distribution.
+    """
+    rep_ctrl = {k: v for k, v in ctrl.items() if k not in ("temperature", "top_k")}
+    logits = _apply_repetition_controls(logits, reply_tokens, **rep_ctrl)
+    temperature = ctrl.get("temperature", DEFAULT_TEMPERATURE)
+
+    if temperature <= 0:
+        return int(np.argmax(logits))
+
+    logits = logits / temperature
+    top_k = ctrl.get("top_k", DEFAULT_TOP_K)
+
+    if top_k > 0:
+        k = min(int(top_k), len(logits))
+        top_idx = np.argpartition(logits, -k)[-k:]
+        top_log = logits[top_idx]
+        probs = np.exp(top_log - np.max(top_log))
+        probs /= probs.sum()
+        return int(np.random.choice(top_idx, p=probs))
+
+    probs = np.exp(logits - np.max(logits))
+    probs /= probs.sum()
+    return int(np.random.choice(np.arange(len(logits)), p=probs))
+
+
+# ── Core generation ───────────────────────────────────────────────────────────
+
+def generate_tokens(
+    conversation_turns: list[str],
+    num_tokens: int = DEFAULT_MAX_NEW_TOKENS,
+    temperature: float = DEFAULT_TEMPERATURE,
+    top_k: int = DEFAULT_TOP_K,
+    repetition_penalty: float = DEFAULT_REPETITION_PENALTY,
+    frequency_penalty: float = DEFAULT_FREQUENCY_PENALTY,
+    recent_token_penalty: float = DEFAULT_RECENT_TOKEN_PENALTY,
+    recent_token_window: int = DEFAULT_RECENT_TOKEN_WINDOW,
+    no_repeat_ngram_size: int = DEFAULT_NO_REPEAT_NGRAM_SIZE,
+    stream: bool = False,
+):
+    """Generate Emma's reply for the current conversation.
+
+    Builds the structured prompt from conversation history, then autoregressively
+    samples up to `num_tokens` new tokens. Stops early if the model produces an
+    EOS or <sep> token, which signals the natural end of the assistant's turn.
+
+    When `stream=False` (default), waits for the full reply and returns it as a
+    plain string.
+
+    When `stream=True`, returns a generator that yields text deltas (the new
+    characters added at each step) so the caller can stream output to the client
+    token by token.
+    """
+    ctrl = dict(
+        temperature=temperature,
+        top_k=top_k,
+        repetition_penalty=repetition_penalty,
+        frequency_penalty=frequency_penalty,
+        recent_token_penalty=recent_token_penalty,
+        recent_token_window=recent_token_window,
+        no_repeat_ngram_size=no_repeat_ngram_size,
+    )
+
+    prompt_ids = build_prompt_ids(conversation_turns)
+    generated = prompt_ids[:]
+    reply_tokens: list[int] = []
+
+    def _token_stream():
+        """Run the autoregressive loop, yielding the full decoded reply so far after each token."""
+        for _ in range(num_tokens):
+            window = generated[-MODEL_MAX_SEQ_LEN:]
+            x = window + [PAD_ID] * (MODEL_MAX_SEQ_LEN - len(window))
+            x_arr = np.array([x], dtype=np.int32)
+
+            logits = model(x_arr, training=False)[0].numpy()
+            last_real_idx = max(i for i, t in enumerate(x) if t != PAD_ID)
+            next_logits = logits[last_real_idx]
+
+            next_id = _sample_next_token(next_logits, reply_tokens, **ctrl)
+
+            if next_id in (EOS_ID, SEP_ID):
                 break
-            input_ids.append(next_token_id)
-            generated_ids.append(next_token_id)
-            # Decode the full generated sequence so far
-            result = sp.decode(generated_ids)
-            # Remove leading whitespace and punctuation only on first yield
-            if i == 0:
-                result = re.sub(r'^[\s\.,;:!?-]+', '', result)
-            yield result
+
+            generated.append(next_id)
+            reply_tokens.append(next_id)
+
+            current_text = sp.decode(reply_tokens)
+            yield current_text
 
     if stream:
-        return token_stream()
-    else:
-        for _ in token_stream():
-            pass
-        # Decode only the generated part
-        result = sp.decode(generated_ids)
-        result = re.sub(r'^[\s\.,;:!?-]+', '', result)
-        return result.strip()
+        prev = ""
 
+        def _delta_stream():
+            """Wrap _token_stream to yield only the new characters added at each step."""
+            nonlocal prev
+            for text in _token_stream():
+                delta = text[len(prev):] if text.startswith(prev) else text[len(os.path.commonprefix([prev, text])):]
+                if delta:
+                    yield delta
+                prev = text
+
+        return _delta_stream()
+    else:
+        text = ""
+        for text in _token_stream():
+            pass
+        return text.strip()

@@ -1,0 +1,6 @@
+flask
+flask-cors
+keras
+numpy
+sentencepiece
+tensorflow
