@@ -6,6 +6,13 @@ import Composer from './components/Composer'
 import ModelParamsPanel from './components/ModelParamsPanel'
 
 
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
+
 function App() {
   const [messages, setMessages] = useState([])
   const [prompt, setPrompt] = useState('')
@@ -14,7 +21,7 @@ function App() {
   const bottomRef = useRef(null)
   const [paramsOpen, setParamsOpen] = useState(false)
   const [modelParams, setModelParams] = useState({ temperature: 0.5, maxTokens: 80 })
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [sessionId, setSessionId] = useState(() => generateUUID())
   const [cutOff, setCutOff] = useState(false)
   const abortControllerRef = useRef(null)
 
@@ -24,7 +31,7 @@ function App() {
     if (!trimmed || isSending) return
 
     if (trimmed === '/reset') {
-      setSessionId(crypto.randomUUID())
+      setSessionId(generateUUID())
       setCutOff(false)
       setMessages((prev) => [...prev, { role: 'assistant', content: 'History cleared.', timestamp: new Date().toISOString() }])
       setPrompt('')
