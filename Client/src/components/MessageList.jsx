@@ -56,6 +56,9 @@ export default function MessageList({ messages, isSending, bottomRef }) {
         >
           <div className="bubble bubble-appear">
             <div className="bubbleRole">{m.role}
+              {m.model && m.role === 'assistant' && (
+                <span className="bubbleModel">{m.model === 'emma' ? 'Emma' : 'GPT2 Finetuned'}</span>
+              )}
               <span className="bubbleTimestamp">{formatTime(m.timestamp)}</span>
             </div>
             <div className={`bubbleContent${m.role === 'assistant' ? ' typewriter' : ''}`}>{m.content}</div>
@@ -66,7 +69,7 @@ export default function MessageList({ messages, isSending, bottomRef }) {
       {showThinking ? (
         <div className="messageRow isAssistant">
           <div className="bubble">
-            <div className="bubbleRole">Willow</div>
+            <div className="bubbleRole">assistant</div>
             <div className="bubbleContent">
               Thinking<span className="thinkingDots" aria-live="polite">
                 <span>.</span><span>.</span><span>.</span>

@@ -221,3 +221,126 @@ input[type="number"] {
   box-shadow: 0 1px 4px 0 rgba(15, 23, 42, 0.08);
   transition: color 0.2s, background 0.2s;
 }
+
+.modelSelector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modelLoadingArea {
+  margin-top: 8px;
+}
+
+.modelOptionWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modelOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.98em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modelOption:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.modelOption.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: 0 2px 8px rgba(80, 80, 120, 0.15);
+}
+
+.modelOption:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.modelOptionText {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.progressBarContainer {
+  display: flex;
+  padding: 0 4px;
+  margin-bottom: 0;
+}
+
+.progressBar {
+  width: 100%;
+  height: 4px;
+  background: var(--accent-bg);
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-border) 100%);
+  border-radius: 2px;
+  animation: progressInfinite 2.5s ease-in-out infinite;
+}
+
+@keyframes progressInfinite {
+  0% {
+    width: 0%;
+  }
+  50% {
+    width: 85%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+.activeIndicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
+.activeIndicator.loading {
+  animation: indicatorSpin 1s linear infinite;
+}
+
+@keyframes indicatorSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes indicatorPulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }

@@ -33,9 +33,27 @@ function getTempExample(temp) {
   return `${ex.low.slice(0, Math.floor(ex.low.length/2))}...${ex.high.slice(Math.floor(ex.high.length/2))}`;
 }
 
-export default function ModelParamsPanel({ open, onClose, params, setParams }) {
+export default function ModelParamsPanel({ open, onClose, params, setParams, onModelChange }) {
   const [visible, setVisible] = useState(open);
   const [closing, setClosing] = useState(false);
+  const [availableModels, setAvailableModels] = useState({});
+  const [currentModel, setCurrentModel] = useState('emma');
+  const [loadingModel, setLoadingModel] = useState(false);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await fetch('/models');
+        const data = await response.json();
+        setAvailableModels(data.available_models || {});
+        setCurrentModel(data.current_model || 'emma');
+      } catch (error) {
+        console.error('Failed to fetch models:', error);
+      }
+    };
+    fetchModels();
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -50,6 +68,33 @@ export default function ModelParamsPanel({ open, onClose, params, setParams }) {
       return () => clearTimeout(timeout);
     }
   }, [open]);
+
+  const handleModelSwitch = async (modelName) => {
+    if (modelName === currentModel) return;
+    
+    setLoadingModel(true);
+    try {
+      const response = await fetch('/models/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: modelName }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentModel(data.current_model);
+        if (onModelChange) {
+          onModelChange(data.current_model);
+        }
+      } else {
+        console.error('Failed to switch model');
+      }
+    } catch (error) {
+      console.error('Error switching model:', error);
+    } finally {
+      setLoadingModel(false);
+    }
+  };
 
   if (!visible) return null;
   return (
@@ -66,6 +111,38 @@ export default function ModelParamsPanel({ open, onClose, params, setParams }) {
         </div>
         <div className="paramsDivider" />
         <div className="paramsBody">
+          <label className="paramLabel">
+            Model
+            <div className="modelSelector">
+              {Object.entries(availableModels).map(([modelId, modelInfo]) => (
+                <div key={modelId} className="modelOptionWrapper">
+                  <button
+                    className={`modelOption ${currentModel === modelId ? 'active' : ''}`}
+                    onClick={() => handleModelSwitch(modelId)}
+                    disabled={loadingModel}
+                  >
+                    <span className="modelOptionText">
+                      {modelInfo.name}
+                    </span>
+                    {currentModel === modelId && (
+                      <span className={`activeIndicator ${loadingModel ? 'loading' : ''}`}>
+                        {loadingModel ? '⟳' : '✓'}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+            {loadingModel && (
+              <div className="modelLoadingArea" aria-live="polite" aria-busy="true">
+                <div className="progressBarContainer">
+                  <div className="progressBar">
+                    <div className="progressFill"></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </label>
           <label className="paramLabel">
             Temperature
             <div className="paramSliderRow">

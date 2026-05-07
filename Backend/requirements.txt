@@ -4,3 +4,6 @@ keras
 numpy
 sentencepiece
 tensorflow
+transformers
+peft
+torch

@@ -1,10 +1,12 @@
 import os
+import re
 from collections import Counter
 
 import numpy as np
 import sentencepiece as spm
+import torch
 
-from model import model, sp
+from model import get_current_model, get_current_model_type, sp, get_gpt2_tokenizer
 
 # ── Special token IDs (must match training) ──────────────────────────────────
 PAD_ID       = sp.pad_id()
@@ -179,6 +181,120 @@ def _sample_next_token(logits: np.ndarray, reply_tokens: list[int], **ctrl) -> i
 
 # ── Core generation ───────────────────────────────────────────────────────────
 
+
+def _strip_role_bleed(reply: str) -> str:
+    """Trim accidental next-turn markers from generated assistant text."""
+    if "User:" in reply:
+        reply = reply[:reply.index("User:")]
+    if "Assistant:" in reply:
+        # Keep only first assistant segment if model repeats speaker markers.
+        first = reply.split("Assistant:")[0]
+        if first.strip():
+            reply = first
+    return reply.strip()
+
+
+def _trim_noisy_tail(reply: str) -> str:
+    """Remove obvious degenerate numbered-dot tails (e.g., '12.... 13.....')."""
+    cleaned = reply.strip()
+    cleaned = re.sub(r"(?:\s\d+\s*\.{2,}){3,}\s*$", "", cleaned)
+    cleaned = re.sub(r"\.{8,}\s*$", "", cleaned)
+    return cleaned.strip()
+
+
+def _looks_complete(text: str) -> bool:
+    """Heuristic to decide if a response ends naturally."""
+    t = text.strip()
+    if not t:
+        return False
+    return t.endswith((".", "!", "?", ")", "]", "\"", "'"))
+
+def _generate_gpt2(
+    conversation_turns: list[str],
+    num_tokens: int = DEFAULT_MAX_NEW_TOKENS,
+    temperature: float = DEFAULT_TEMPERATURE,
+    top_k: int = DEFAULT_TOP_K,
+    repetition_penalty: float = DEFAULT_REPETITION_PENALTY,
+    stream: bool = False,
+):
+    """Generate reply using GPT2 model with notebook-aligned prompt and decoding."""
+    tokenizer = get_gpt2_tokenizer()
+    model = get_current_model()
+
+    # Build prompt exactly like training notebook format.
+    prompt = ""
+    for i, turn in enumerate(conversation_turns):
+        role = "User" if i % 2 == 0 else "Assistant"
+        prompt += f"{role}: {turn}\n"
+    prompt += "Assistant:"
+
+    # Encode prompt
+    inputs = tokenizer(prompt, return_tensors="pt")
+    device = next(model.parameters()).device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    # Generate with the same style of settings as training.
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=num_tokens,
+            do_sample=True,
+            temperature=temperature,
+            top_k=top_k,
+            repetition_penalty=repetition_penalty,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    # Decode only new tokens after prompt, matching notebook logic.
+    prompt_len = inputs["input_ids"].shape[1]
+    reply_ids = outputs[0][prompt_len:]
+    reply = tokenizer.decode(reply_ids, skip_special_tokens=True)
+    reply = _strip_role_bleed(reply)
+    reply = _trim_noisy_tail(reply)
+
+    # Dynamic but bounded continuation: if generation likely stopped due to token cap
+    # and still looks incomplete, continue with conservative decoding.
+    if len(reply_ids) >= num_tokens and not _looks_complete(reply):
+        generated = outputs
+        extra_budget = 48
+        step = 16
+
+        while extra_budget > 0 and not _looks_complete(reply):
+            with torch.no_grad():
+                continued = model.generate(
+                    input_ids=generated,
+                    max_new_tokens=min(step, extra_budget),
+                    do_sample=False,
+                    repetition_penalty=repetition_penalty,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+            new_ids = continued[0][generated.shape[1]:]
+            if new_ids.numel() == 0:
+                break
+
+            extra_budget -= int(new_ids.shape[0])
+            new_text = tokenizer.decode(new_ids, skip_special_tokens=True)
+            new_text = _strip_role_bleed(new_text)
+            new_text = _trim_noisy_tail(new_text)
+
+            if not new_text:
+                break
+
+            reply = f"{reply} {new_text}".strip()
+            generated = continued
+
+    if stream:
+        def _delta_stream():
+            # Stream as small text chunks for UI typing effect.
+            for ch in reply:
+                yield ch
+
+        return _delta_stream()
+
+    return reply
+
+
 def generate_tokens(
     conversation_turns: list[str],
     num_tokens: int = DEFAULT_MAX_NEW_TOKENS,
@@ -204,6 +320,19 @@ def generate_tokens(
     characters added at each step) so the caller can stream output to the client
     token by token.
     """
+    # Route to appropriate model implementation
+    model_type = get_current_model_type()
+    if model_type == "gpt2":
+        return _generate_gpt2(
+            conversation_turns,
+            num_tokens=num_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            repetition_penalty=repetition_penalty,
+            stream=stream,
+        )
+    
+    # Keras model generation (original implementation)
     ctrl = dict(
         temperature=temperature,
         top_k=top_k,
@@ -223,9 +352,13 @@ def generate_tokens(
         for _ in range(num_tokens):
             window = generated[-MODEL_MAX_SEQ_LEN:]
             x = window + [PAD_ID] * (MODEL_MAX_SEQ_LEN - len(window))
+            
+            model = get_current_model()
+            
+            # Keras model: expects numpy array
             x_arr = np.array([x], dtype=np.int32)
-
             logits = model(x_arr, training=False)[0].numpy()
+            
             last_real_idx = max(i for i, t in enumerate(x) if t != PAD_ID)
             next_logits = logits[last_real_idx]
 

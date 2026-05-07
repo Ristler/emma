@@ -1,5 +1,5 @@
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import './App.css'
 import MessageList from './components/MessageList'
 import Composer from './components/Composer'
@@ -24,6 +24,35 @@ function App() {
   const [sessionId, setSessionId] = useState(() => generateUUID())
   const [cutOff, setCutOff] = useState(false)
   const abortControllerRef = useRef(null)
+  const [currentModel, setCurrentModel] = useState('emma')
+
+  function getModelProfile(modelName) {
+    if (modelName === 'gpt2_finetuned') {
+      return { temperature: 0.7, maxTokens: 220 }
+    }
+    return { temperature: 0.5, maxTokens: 160 }
+  }
+
+  function looksComplete(text) {
+    const t = (text || '').trim()
+    if (!t) return false
+    return /[.!?"')\]]$/.test(t)
+  }
+
+  // Fetch current model on mount
+  useEffect(() => {
+    const fetchCurrentModel = async () => {
+      try {
+        const response = await fetch('/models')
+        const data = await response.json()
+        setCurrentModel(data.current_model)
+        setModelParams(getModelProfile(data.current_model))
+      } catch (error) {
+        console.error('Failed to fetch current model:', error)
+      }
+    }
+    fetchCurrentModel()
+  }, [])
 
 
   async function sendPrompt(userPrompt) {
@@ -69,10 +98,14 @@ function App() {
       })
       if (!res.body) throw new Error('No response body')
 
+      const responseModel = res.headers.get('X-Model-Name') || currentModel
+      const tokenBudget = Number(res.headers.get('X-Token-Budget') || modelParams.maxTokens)
+
       let assistantMessage = {
         role: 'assistant',
         content: '',
         timestamp: new Date().toISOString(),
+        model: currentModel,
       }
       setMessages((prev) => [...prev, assistantMessage])
 
@@ -98,8 +131,8 @@ function App() {
           })
         }
       }
-      // If we streamed exactly maxTokens, likely cut off
-      if (tokenCount >= modelParams.maxTokens) {
+      // Show cutoff warning only for shorter-profile replies that still look incomplete.
+      if (responseModel !== 'gpt2_finetuned' && tokenCount >= tokenBudget && !looksComplete(assistantMessage.content)) {
         setCutOff(true)
       }
     } catch (e) {
@@ -161,6 +194,10 @@ function App() {
         onClose={() => setParamsOpen(false)}
         params={modelParams}
         setParams={setModelParams}
+        onModelChange={(modelName) => {
+          setCurrentModel(modelName)
+          setModelParams(getModelProfile(modelName))
+        }}
       />
     </div>
   )

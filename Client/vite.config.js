@@ -12,6 +12,11 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_CHAT_ENDPOINT || 'http://localhost:5000',
           changeOrigin: true,
           secure: false
+        },
+        '/models': {
+          target: env.VITE_CHAT_ENDPOINT || 'http://localhost:5000',
+          changeOrigin: true,
+          secure: false
         }
       }
     }

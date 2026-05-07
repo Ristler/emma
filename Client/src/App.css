@@ -225,6 +225,17 @@
   opacity: 0.95;
 }
 
+.bubbleModel {
+  font-size: 0.8em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-weight: 600;
+  display: inline-block;
+}
+
 .bubbleContent {
   white-space: pre-wrap;
   word-break: break-word;

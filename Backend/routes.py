@@ -7,6 +7,7 @@ from services.promptService import (
     DEFAULT_TOP_K,
     DEFAULT_MAX_CONTEXT_TURNS,
 )
+from model import load_model, get_current_model_name, get_available_models
 
 # In-memory store mapping session_id -> list of alternating conversation turns.
 # Each session holds the recent history for one chat session (one browser tab).
@@ -66,7 +67,10 @@ def register_routes(app):
                     turns.extend([prompt, reply])
                     _sessions[session_id] = trim_turns(turns, DEFAULT_MAX_CONTEXT_TURNS)
 
-            return Response(_generate(), mimetype="text/plain")
+            response = Response(_generate(), mimetype="text/plain")
+            response.headers["X-Model-Name"] = get_current_model_name()
+            response.headers["X-Token-Budget"] = str(max_tokens)
+            return response
         else:
             reply = generate_tokens(
                 turns_for_model,
@@ -76,4 +80,55 @@ def register_routes(app):
             )
             turns.extend([prompt, reply])
             _sessions[session_id] = trim_turns(turns, DEFAULT_MAX_CONTEXT_TURNS)
-            return jsonify({"generated_text": reply})
+            return jsonify({
+                "generated_text": reply,
+                "model_name": get_current_model_name(),
+                "token_budget": max_tokens,
+            })
+
+    @app.route("/models", methods=["GET"])
+    def list_models():
+        """Get list of available models and the currently active model.
+
+        Returns a JSON object with:
+            available_models (dict) - mapping of model_id to model metadata
+            current_model    (str)  - the currently active model id
+        """
+        available = get_available_models()
+        current = get_current_model_name()
+        
+        return jsonify({
+            "available_models": available,
+            "current_model": current,
+        })
+
+    @app.route("/models/switch", methods=["POST"])
+    def switch_model():
+        """Switch to a different model.
+
+        Expects a JSON body with:
+            model_name (str, required) - the model id to switch to
+
+        Returns a JSON object with:
+            success      (bool)  - whether the switch was successful
+            current_model (str)  - the now-active model id
+            message      (str)   - status message
+        """
+        data = request.get_json()
+        model_name = data.get("model_name")
+        
+        if not model_name:
+            return jsonify({"error": "Missing model_name"}), 400
+        
+        try:
+            load_model(model_name)
+            return jsonify({
+                "success": True,
+                "current_model": get_current_model_name(),
+                "message": f"Successfully switched to {model_name}",
+            })
+        except ValueError as e:
+            return jsonify({
+                "error": str(e),
+                "current_model": get_current_model_name(),
+            }), 400
