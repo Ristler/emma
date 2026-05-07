@@ -2,9 +2,7 @@ from flask import request, jsonify, Response
 from services.promptService import (
     generate_tokens,
     trim_turns,
-    DEFAULT_MAX_NEW_TOKENS,
-    DEFAULT_TEMPERATURE,
-    DEFAULT_TOP_K,
+    get_defaults,
     DEFAULT_MAX_CONTEXT_TURNS,
 )
 from model import load_model, get_current_model_name, get_available_models
@@ -23,9 +21,9 @@ def register_routes(app):
         Expects a JSON body with:
             prompt      (str, required)  - the user's message
             session_id  (str, optional)  - identifies the conversation; defaults to "default"
-            num_tokens  (int, optional)  - max tokens to generate; defaults to DEFAULT_MAX_NEW_TOKENS
-            temperature (float, optional)- sampling temperature; defaults to DEFAULT_TEMPERATURE
-            top_k       (int, optional)  - top-k candidate pool size; defaults to DEFAULT_TOP_K
+            num_tokens  (int, optional)  - max tokens to generate; defaults to active model's setting
+            temperature (float, optional)- sampling temperature; defaults to active model's setting
+            top_k       (int, optional)  - top-k candidate pool size; defaults to active model's setting
             stream      (bool, optional) - stream response token by token; defaults to False
 
         The user message is appended to the session history before generation.
@@ -41,9 +39,10 @@ def register_routes(app):
             return jsonify({"error": "Missing prompt"}), 400
 
         session_id   = data.get("session_id", "default")
-        max_tokens   = int(data.get("num_tokens", DEFAULT_MAX_NEW_TOKENS))
-        temperature  = float(data.get("temperature", DEFAULT_TEMPERATURE))
-        top_k        = int(data.get("top_k", DEFAULT_TOP_K))
+        defaults     = get_defaults()
+        max_tokens   = int(data.get("num_tokens",  defaults["num_tokens"]))
+        temperature  = float(data.get("temperature", defaults["temperature"]))
+        top_k        = int(data.get("top_k",        defaults["top_k"]))
         stream       = bool(data.get("stream", False))
 
         turns = _sessions.setdefault(session_id, [])

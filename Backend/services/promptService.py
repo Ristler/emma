@@ -11,11 +11,24 @@ from services import emmaService, gpt2Service
 
 
 # ── Shared defaults exposed to the API layer ─────────────────────────────────
-DEFAULT_MAX_NEW_TOKENS     = 80
-DEFAULT_TEMPERATURE        = 0.5
-DEFAULT_TOP_K              = 40
-DEFAULT_REPETITION_PENALTY = 1.15
-DEFAULT_MAX_CONTEXT_TURNS  = 6
+# Per-model sampling defaults live in their own service modules. The API layer
+# resolves them at request time via `get_defaults()` so the active model's own
+# defaults apply when the client doesn't override.
+DEFAULT_MAX_CONTEXT_TURNS = 6
+
+
+def get_defaults() -> dict:
+    """Return the active model's sampling defaults."""
+    if get_current_model_type() == "gpt2":
+        svc = gpt2Service
+    else:
+        svc = emmaService
+    return {
+        "num_tokens":         svc.DEFAULT_MAX_NEW_TOKENS,
+        "temperature":        svc.DEFAULT_TEMPERATURE,
+        "top_k":              svc.DEFAULT_TOP_K,
+        "repetition_penalty": svc.DEFAULT_REPETITION_PENALTY,
+    }
 
 
 def trim_turns(turns: list[str], max_turns: int) -> list[str]:
@@ -31,10 +44,10 @@ def trim_turns(turns: list[str], max_turns: int) -> list[str]:
 
 def generate_tokens(
     conversation_turns: list[str],
-    num_tokens: int = DEFAULT_MAX_NEW_TOKENS,
-    temperature: float = DEFAULT_TEMPERATURE,
-    top_k: int = DEFAULT_TOP_K,
-    repetition_penalty: float = DEFAULT_REPETITION_PENALTY,
+    num_tokens: int | None = None,
+    temperature: float | None = None,
+    top_k: int | None = None,
+    repetition_penalty: float | None = None,
     stream: bool = False,
     **extra_keras_kwargs,
 ):
@@ -52,6 +65,16 @@ def generate_tokens(
     """
     model = get_current_model()
     model_type = get_current_model_type()
+    svc = gpt2Service if model_type == "gpt2" else emmaService
+
+    if num_tokens is None:
+        num_tokens = svc.DEFAULT_MAX_NEW_TOKENS
+    if temperature is None:
+        temperature = svc.DEFAULT_TEMPERATURE
+    if top_k is None:
+        top_k = svc.DEFAULT_TOP_K
+    if repetition_penalty is None:
+        repetition_penalty = svc.DEFAULT_REPETITION_PENALTY
 
     if model_type == "gpt2":
         return gpt2Service.generate(

@@ -30,9 +30,9 @@ function App() {
 
   function getModelProfile(modelName) {
     if (modelName === 'gpt2_finetuned') {
-      return { temperature: 0.7, maxTokens: 220 }
+      return { temperature: 0.8, maxTokens: 80 }
     }
-    return { temperature: 0.5, maxTokens: 160 }
+    return { temperature: 0.5, maxTokens: 80 }
   }
 
   function looksComplete(text) {

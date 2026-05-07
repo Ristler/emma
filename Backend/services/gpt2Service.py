@@ -14,6 +14,13 @@ from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStr
 from model import get_gpt2_tokenizer
 
 
+# ── Sampling defaults (match the LoRA finetune notebook) ─────────────────────
+DEFAULT_MAX_NEW_TOKENS     = 80
+DEFAULT_TEMPERATURE        = 0.8
+DEFAULT_TOP_K              = 40
+DEFAULT_REPETITION_PENALTY = 1.15
+
+
 # ── Output cleanup helpers ───────────────────────────────────────────────────
 
 def _strip_role_bleed(reply: str) -> str:

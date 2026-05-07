@@ -21,7 +21,13 @@ SEP_ID       = sp.piece_to_id("<sep>")
 
 MODEL_MAX_SEQ_LEN = 512
 
-# ── Keras-only sampling defaults ─────────────────────────────────────────────
+# ── Sampling defaults ────────────────────────────────────────────────────────
+DEFAULT_MAX_NEW_TOKENS       = 80
+DEFAULT_TEMPERATURE          = 0.5
+DEFAULT_TOP_K                = 40
+DEFAULT_REPETITION_PENALTY   = 1.15
+
+# Keras-only repetition controls (no GPT2 equivalent).
 DEFAULT_FREQUENCY_PENALTY    = 0.08
 DEFAULT_RECENT_TOKEN_PENALTY = 0.12
 DEFAULT_RECENT_TOKEN_WINDOW  = 14
