@@ -69,7 +69,7 @@ export default function MessageList({ messages, isSending, bottomRef }) {
       {showThinking ? (
         <div className="messageRow isAssistant">
           <div className="bubble">
-            <div className="bubbleRole">assistant</div>
+            <div className="bubbleRole">Assistant</div>
             <div className="bubbleContent">
               Thinking<span className="thinkingDots" aria-live="polite">
                 <span>.</span><span>.</span><span>.</span>

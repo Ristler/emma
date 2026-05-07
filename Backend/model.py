@@ -64,42 +64,71 @@ def load_gpt2_model():
     return model
 
 
+_gpt2_tokenizer = None
+
+
 def get_gpt2_tokenizer():
-    """Load the GPT2 tokenizer from the finetuned model directory."""
-    return AutoTokenizer.from_pretrained(str(GPT2_MODEL_PATH))
+    """Return the GPT2 tokenizer, loading it once and caching the instance."""
+    global _gpt2_tokenizer
+    if _gpt2_tokenizer is None:
+        _gpt2_tokenizer = AutoTokenizer.from_pretrained(str(GPT2_MODEL_PATH))
+    return _gpt2_tokenizer
+
+
+def _release_current_model():
+    """Drop the currently loaded model and free GPU memory if applicable."""
+    global _current_model
+    if _current_model is None:
+        return
+
+    previous_type = AVAILABLE_MODELS[_current_model_name]["type"]
+    _current_model = None
+
+    if previous_type == "gpt2":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
 
 def load_model(model_name: str):
     """Load the specified model by name and update global state.
-    
+
     Args:
         model_name: Key from AVAILABLE_MODELS dictionary
-        
+
     Returns:
         The loaded model object
-        
+
     Raises:
         ValueError: If model_name is not recognized
     """
     global _current_model, _current_model_name
-    
+
     if model_name not in AVAILABLE_MODELS:
         raise ValueError(f"Unknown model: {model_name}. Available: {list(AVAILABLE_MODELS.keys())}")
-    
+
     model_config = AVAILABLE_MODELS[model_name]
-    
+
     print(f"Loading model: {model_config['name']}...")
-    
+
+    # Free the previous model before allocating the new one to avoid holding
+    # both in memory (especially on small GPUs).
+    _release_current_model()
+
     if model_config["type"] == "keras":
-        _current_model = load_keras_model()
+        new_model = load_keras_model()
     elif model_config["type"] == "gpt2":
-        _current_model = load_gpt2_model()
+        new_model = load_gpt2_model()
     else:
         raise ValueError(f"Unknown model type: {model_config['type']}")
-    
+
+    _current_model = new_model
     _current_model_name = model_name
     print(f"Model loaded successfully: {model_config['name']}")
-    
+
     return _current_model
 
 

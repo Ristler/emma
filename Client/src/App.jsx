@@ -25,6 +25,8 @@ function App() {
   const [cutOff, setCutOff] = useState(false)
   const abortControllerRef = useRef(null)
   const [currentModel, setCurrentModel] = useState('emma')
+  const [availableModels, setAvailableModels] = useState({})
+  const [switchingModel, setSwitchingModel] = useState(false)
 
   function getModelProfile(modelName) {
     if (modelName === 'gpt2_finetuned') {
@@ -39,20 +41,46 @@ function App() {
     return /[.!?"')\]]$/.test(t)
   }
 
-  // Fetch current model on mount
+  // Fetch available models + current selection on mount
   useEffect(() => {
-    const fetchCurrentModel = async () => {
+    const fetchModels = async () => {
       try {
         const response = await fetch('/models')
         const data = await response.json()
-        setCurrentModel(data.current_model)
-        setModelParams(getModelProfile(data.current_model))
+        setAvailableModels(data.available_models || {})
+        if (data.current_model) {
+          setCurrentModel(data.current_model)
+          setModelParams(getModelProfile(data.current_model))
+        }
       } catch (error) {
-        console.error('Failed to fetch current model:', error)
+        console.error('Failed to fetch models:', error)
       }
     }
-    fetchCurrentModel()
+    fetchModels()
   }, [])
+
+  async function switchModel(modelName) {
+    if (modelName === currentModel || switchingModel) return
+    setSwitchingModel(true)
+    try {
+      const response = await fetch('/models/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: modelName }),
+      })
+      if (!response.ok) {
+        console.error('Failed to switch model')
+        return
+      }
+      const data = await response.json()
+      setCurrentModel(data.current_model)
+      setModelParams(getModelProfile(data.current_model))
+    } catch (error) {
+      console.error('Error switching model:', error)
+    } finally {
+      setSwitchingModel(false)
+    }
+  }
 
 
   async function sendPrompt(userPrompt) {
@@ -105,7 +133,7 @@ function App() {
         role: 'assistant',
         content: '',
         timestamp: new Date().toISOString(),
-        model: currentModel,
+        model: responseModel,
       }
       setMessages((prev) => [...prev, assistantMessage])
 
@@ -194,10 +222,10 @@ function App() {
         onClose={() => setParamsOpen(false)}
         params={modelParams}
         setParams={setModelParams}
-        onModelChange={(modelName) => {
-          setCurrentModel(modelName)
-          setModelParams(getModelProfile(modelName))
-        }}
+        availableModels={availableModels}
+        currentModel={currentModel}
+        switchingModel={switchingModel}
+        onSwitchModel={switchModel}
       />
     </div>
   )
